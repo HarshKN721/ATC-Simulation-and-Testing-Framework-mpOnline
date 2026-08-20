@@ -1,0 +1,6 @@
+@AtcSimulationFramework_HostAddress = http://localhost:5096
+
+GET {{AtcSimulationFramework_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

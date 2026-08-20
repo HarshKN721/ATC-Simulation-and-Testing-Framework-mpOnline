@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AtcSimulationFramework.Tests/AtcSimulationFramework.Tests.csproj" />
+  <Project Path="AtcSimulationFramework/AtcSimulationFramework.csproj" />
+</Solution>
