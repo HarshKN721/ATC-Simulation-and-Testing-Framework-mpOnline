@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ATC Simulation Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --border: #2a3350;
+    --text: #e6e9f0;
+    --muted: #8b93a7;
+    --accent: #3b82f6;
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.18);
+    --ok: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+  button {
+    padding: 9px 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  #startBtn { background: var(--ok); color: #06210f; }
+  #stopBtn { background: var(--danger); color: #2b0505; }
+
+  .run-id { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .status-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--muted);
+  }
+  .status-dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr.conflict {
+    background: var(--danger-bg);
+    color: #fecaca;
+  }
+  tbody tr.conflict td:first-child { font-weight: 700; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+  .empty-state {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 20px 4px;
+    text-align: center;
+  }
+
+  .error-banner {
+    background: var(--danger-bg);
+    color: #fecaca;
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+  <h1>ATC Simulation Dashboard</h1>
+  <div class="subtitle">Table view, polled every 3 seconds — no SignalR / Canvas.</div>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="panel controls">
+    <button id="startBtn">Start Run</button>
+    <button id="stopBtn" disabled>Stop Run</button>
+    <span class="run-id">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="runIdLabel">No active run</span>
+    </span>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>Callsign</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Altitude</th>
+          <th>Heading</th>
+          <th>Speed</th>
+        </tr>
+      </thead>
+      <tbody id="aircraftTableBody">
+        <tr><td colspan="6" class="empty-state">No aircraft data yet. Start a run to begin polling.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+  // ---- Config ----
+  const API_BASE = "/api/simulationruns";
+  const POLL_INTERVAL_MS = 3000;
+
+  // ---- State ----
+  let currentRunId = null;
+  let pollTimerId = null;
+
+  // ---- DOM refs ----
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const runIdLabel = document.getElementById("runIdLabel");
+  const statusDot = document.getElementById("statusDot");
+  const tableBody = document.getElementById("aircraftTableBody");
+  const errorBanner = document.getElementById("errorBanner");
+
+  function showError(message) {
+    errorBanner.textContent = message;
+    errorBanner.style.display = "block";
+  }
+
+  function clearError() {
+    errorBanner.style.display = "none";
+    errorBanner.textContent = "";
+  }
+
+  function setRunningUI(runId) {
+    currentRunId = runId;
+    runIdLabel.textContent = runId ? `Run #${runId} — polling every 3s` : "No active run";
+    statusDot.classList.toggle("live", !!runId);
+    startBtn.disabled = !!runId;
+    stopBtn.disabled = !runId;
+  }
+
+  /**
+   * Single reusable function for rendering the aircraft table.
+   * Called every time new polling data arrives — never duplicate
+   * table-building markup anywhere else.
+   *
+   * @param {Array<Object>} data - array of aircraft objects
+   *   Expected shape (adjust field names to match the API if they differ):
+   *   { callsign, latitude, longitude, altitude, heading, speed, icao24 }
+   * @param {Set<string>} conflictKeys - set of aircraft identifiers
+   *   (icao24 or callsign) currently involved in a conflict
+   */
+  function renderAircraftTable(data, conflictKeys = new Set()) {
+    if (!Array.isArray(data) || data.length === 0) {
+      tableBody.innerHTML =
+        '<tr><td colspan="6" class="empty-state">No aircraft currently in this run.</td></tr>';
+      return;
+    }
+
+    const rowsHtml = data.map(aircraft => {
+      const key = aircraft.icao24 ?? aircraft.callsign;
+      const inConflict = conflictKeys.has(key);
+
+      return `
+        <tr class="${inConflict ? "conflict" : ""}">
+          <td>${escapeHtml(aircraft.callsign)}</td>
+          <td>${formatNumber(aircraft.latitude, 4)}</td>
+          <td>${formatNumber(aircraft.longitude, 4)}</td>
+          <td>${formatNumber(aircraft.altitude, 0)} ft</td>
+          <td>${formatNumber(aircraft.heading, 0)}&deg;</td>
+          <td>${formatNumber(aircraft.speed, 0)} kt</td>
+        </tr>`;
+    }).join("");
+
+    tableBody.innerHTML = rowsHtml;
+  }
+
+  function formatNumber(value, decimals) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+    return Number(value).toFixed(decimals);
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  /**
+   * Extracts a Set of aircraft identifiers currently in conflict
+   * from the conflicts endpoint payload. Handles a couple of
+   * plausible shapes defensively — adjust to match the real API.
+   */
+  function extractConflictKeys(conflictsData) {
+    const keys = new Set();
+    if (!Array.isArray(conflictsData)) return keys;
+
+    conflictsData.forEach(conflict => {
+      // Common shapes: { aircraft1Id, aircraft2Id } or
+      // { aircraftAIcao24, aircraftBIcao24 } or a callsign pair.
+      const candidates = [
+        conflict.aircraft1Id, conflict.aircraft2Id,
+        conflict.aircraftAIcao24, conflict.aircraftBIcao24,
+        conflict.icao24A, conflict.icao24B,
+        conflict.callsignA, conflict.callsignB
+      ].filter(v => v !== undefined && v !== null);
+
+      candidates.forEach(id => keys.add(id));
+    });
+
+    return keys;
+  }
+
+  /**
+   * Fetches current aircraft + conflicts for the active run,
+   * cross-references them, and renders the table.
+   */
+  async function pollAircraft() {
+    if (!currentRunId) return;
+
+    try {
+      const [aircraftRes, conflictsRes] = await Promise.all([
+        fetch(`${API_BASE}/${currentRunId}/aircraft`),
+        fetch(`${API_BASE}/${currentRunId}/conflicts`)
+      ]);
+
+      if (!aircraftRes.ok) throw new Error(`Aircraft fetch failed (${aircraftRes.status})`);
+      if (!conflictsRes.ok) throw new Error(`Conflicts fetch failed (${conflictsRes.status})`);
+
+      const aircraftData = await aircraftRes.json();
+      const conflictsData = await conflictsRes.json();
+
+      const conflictKeys = extractConflictKeys(conflictsData);
+      renderAircraftTable(aircraftData, conflictKeys);
+      clearError();
+    } catch (err) {
+      console.error(err);
+      showError(`Polling error: ${err.message}`);
+    }
+  }
+
+  function startPolling() {
+    stopPolling(); // guard against double timers
+    pollAircraft(); // immediate first fetch, don't wait 3s
+    pollTimerId = setInterval(pollAircraft, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollTimerId) {
+      clearInterval(pollTimerId);
+      pollTimerId = null;
+    }
+  }
+
+  async function startRun() {
+    startBtn.disabled = true;
+    try {
+      const res = await fetch(API_BASE, { method: "POST" });
+      if (!res.ok) throw new Error(`Start run failed (${res.status})`);
+      const run = await res.json();
+      // Adjust field name below ('id') to match the actual API response shape.
+      const runId = run.id ?? run.runId ?? run.simulationRunId;
+
+      setRunningUI(runId);
+      clearError();
+      startPolling();
+    } catch (err) {
+      console.error(err);
+      showError(`Could not start run: ${err.message}`);
+      startBtn.disabled = false;
+    }
+  }
+
+  async function stopRun() {
+    if (!currentRunId) return;
+    stopBtn.disabled = true;
+    try {
+      const res = await fetch(`${API_BASE}/${currentRunId}/stop`, { method: "PATCH" });
+      if (!res.ok) throw new Error(`Stop run failed (${res.status})`);
+
+      stopPolling();
+      setRunningUI(null);
+      clearError();
+    } catch (err) {
+      console.error(err);
+      showError(`Could not stop run: ${err.message}`);
+      stopBtn.disabled = false;
+    }
+  }
+
+  startBtn.addEventListener("click", startRun);
+  stopBtn.addEventListener("click", stopRun);
+</script>
+</body>
+</html>
