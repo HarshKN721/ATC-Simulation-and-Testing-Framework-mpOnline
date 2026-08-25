@@ -1,4 +1,4 @@
-﻿namespace AtcSimulationFramework.Data;
+namespace AtcSimulationFramework.Data;
 
 using Microsoft.EntityFrameworkCore;
 using AtcSimulationFramework.Models;
@@ -9,4 +9,6 @@ public class AtcDbContext : DbContext
 
     public DbSet<Aircraft> Aircraft => Set<Aircraft>();
     public DbSet<ConflictEvent> ConflictEvents => Set<ConflictEvent>();
+    public DbSet<SimulationRun> SimulationRuns => Set<SimulationRun>();
+    public DbSet<PositionLog> PositionLogs => Set<PositionLog>();
 }
