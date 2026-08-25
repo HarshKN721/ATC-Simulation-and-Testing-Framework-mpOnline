@@ -1,0 +1,6 @@
+@AtcSimulationFramework.Api_HostAddress = http://localhost:5279
+
+GET {{AtcSimulationFramework.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
