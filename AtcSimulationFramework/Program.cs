@@ -1,13 +1,28 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 using AtcSimulationFramework.Data;
 using AtcSimulationFramework.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 // Yeh waala program mai check kar lunga (HKN)
 // ---------------------------------------------------------------------
-// 1. Controllers — REST API endpoints 
+// 1. Controllers — REST API endpoints
+//    IgnoreCycles prevents infinite loops when serialising entities
+//    that have circular navigation properties (e.g. Run → Aircraft → Run).
 // ---------------------------------------------------------------------
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o =>
+        o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
+
+// ---------------------------------------------------------------------
+// 1b. CORS — allow any origin during development so a separate
+//     frontend dev-server (or tools like Postman) can reach the API.
+// ---------------------------------------------------------------------
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod()));
 
 // ---------------------------------------------------------------------
 // 2. OpenAPI / Swagger — lets us test endpoints live at /swagger
@@ -57,6 +72,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors();
 app.UseHttpsRedirection();
 app.UseStaticFiles();   // serves wwwroot/index.html + app.js (Aryaman's frontend)
 app.UseAuthorization();

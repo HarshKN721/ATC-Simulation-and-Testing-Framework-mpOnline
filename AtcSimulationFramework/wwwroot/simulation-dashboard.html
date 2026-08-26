@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ATC Simulation Dashboard</title>
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css" />
 <style>
   :root {
     --bg: #0f1420;
@@ -50,6 +51,7 @@
 
   #startBtn { background: var(--ok); color: #06210f; }
   #stopBtn { background: var(--danger); color: #2b0505; }
+  .map-btn { background: #243049; color: var(--text); border: 1px solid var(--border); }
 
   .run-id { font-size: 13px; color: var(--muted); margin-left: auto; }
   .status-dot {
@@ -60,6 +62,46 @@
     background: var(--muted);
   }
   .status-dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+
+  .map-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .map-header h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .map-header .hint { color: var(--muted); font-size: 12px; }
+  .map-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .legend-swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .legend-swatch.ok { background: #38bdf8; }
+  .legend-swatch.conflict { background: var(--danger); }
+
+  label.follow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  #map3d {
+    height: 540px;
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .cesium-viewer-bottom { display: none; }
+  .cesium-widget-credits { display: none !important; }
 
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   thead th {
@@ -81,7 +123,8 @@
     color: #fecaca;
   }
   tbody tr.conflict td:first-child { font-weight: 700; }
-  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  tbody tr:hover { background: rgba(255,255,255,0.03); cursor: pointer; }
+  tbody tr.selected { outline: 1px solid var(--accent); }
 
   .empty-state {
     color: var(--muted);
@@ -105,7 +148,7 @@
 <body>
 
   <h1>ATC Simulation Dashboard</h1>
-  <div class="subtitle">Table view, polled every 3 seconds — no SignalR / Canvas.</div>
+  <div class="subtitle">3D navigation map + table view, polled every 3 seconds.</div>
 
   <div class="error-banner" id="errorBanner"></div>
 
@@ -116,6 +159,23 @@
       <span class="status-dot" id="statusDot"></span>
       <span id="runIdLabel">No active run</span>
     </span>
+  </div>
+
+  <div class="panel">
+    <div class="map-header">
+      <h2>3D navigation map</h2>
+      <span class="hint">Drag to orbit · scroll to zoom · click an aircraft or table row to focus</span>
+      <label class="follow">
+        <input type="checkbox" id="followTraffic" />
+        Follow traffic
+      </label>
+      <button type="button" class="map-btn" id="fitViewBtn">Fit all</button>
+      <div class="map-legend">
+        <span><span class="legend-swatch ok"></span>Clear</span>
+        <span><span class="legend-swatch conflict"></span>Conflict</span>
+      </div>
+    </div>
+    <div id="map3d"></div>
   </div>
 
   <div class="panel">
@@ -136,14 +196,71 @@
     </table>
   </div>
 
+  <div class="panel">
+    <div class="map-header">
+      <h2>Active conflicts</h2>
+      <span class="hint">Live separation violations from the latest positions</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Pair</th>
+          <th>Horizontal</th>
+          <th>Vertical</th>
+        </tr>
+      </thead>
+      <tbody id="conflictsTableBody">
+        <tr><td colspan="3" class="empty-state">No conflicts.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div class="map-header">
+      <h2>Vector commands</h2>
+      <span class="hint">Issued by the automated controller (altitude values are flight level)</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Callsign</th>
+          <th>Type</th>
+          <th>Value</th>
+          <th>Issued</th>
+        </tr>
+      </thead>
+      <tbody id="commandsTableBody">
+        <tr><td colspan="4" class="empty-state">No commands yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
 <script>
+  window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/";
+</script>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
+<script>
+
   // ---- Config ----
   const API_BASE = "/api/simulationruns";
   const POLL_INTERVAL_MS = 3000;
+  const MAX_TRAIL_POINTS = 80;
+  const FT_TO_M = 0.3048;
 
   // ---- State ----
   let currentRunId = null;
   let pollTimerId = null;
+  let viewer = null;
+  let didFitCamera = false;
+  let selectedAircraftKey = null;
+  const trails = new Map();
+
+  const PLANE_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <g fill="#e6e9f0" stroke="#0f1420" stroke-width="1">
+        <polygon points="24,4 28,22 44,28 28,30 24,44 20,30 4,28 20,22"/>
+      </g>
+    </svg>`);
 
   // ---- DOM refs ----
   const startBtn = document.getElementById("startBtn");
@@ -151,7 +268,11 @@
   const runIdLabel = document.getElementById("runIdLabel");
   const statusDot = document.getElementById("statusDot");
   const tableBody = document.getElementById("aircraftTableBody");
+  const conflictsTableBody = document.getElementById("conflictsTableBody");
+  const commandsTableBody = document.getElementById("commandsTableBody");
   const errorBanner = document.getElementById("errorBanner");
+  const followTraffic = document.getElementById("followTraffic");
+  const fitViewBtn = document.getElementById("fitViewBtn");
 
   function showError(message) {
     errorBanner.textContent = message;
@@ -171,16 +292,20 @@
     stopBtn.disabled = !runId;
   }
 
+  function aircraftKey(aircraft) {
+    return String(aircraft.aircraftId ?? aircraft.icao24 ?? aircraft.callsign);
+  }
+
   /**
    * Single reusable function for rendering the aircraft table.
    * Called every time new polling data arrives — never duplicate
    * table-building markup anywhere else.
    *
    * @param {Array<Object>} data - array of aircraft objects
-   *   Expected shape (adjust field names to match the API if they differ):
-   *   { callsign, latitude, longitude, altitude, heading, speed, icao24 }
+   *   Expected shape:
+   *   { callsign, latitude, longitude, altitude, heading, speed, icao24, aircraftId }
    * @param {Set<string>} conflictKeys - set of aircraft identifiers
-   *   (icao24 or callsign) currently involved in a conflict
+   *   currently involved in a conflict
    */
   function renderAircraftTable(data, conflictKeys = new Set()) {
     if (!Array.isArray(data) || data.length === 0) {
@@ -190,11 +315,12 @@
     }
 
     const rowsHtml = data.map(aircraft => {
-      const key = aircraft.icao24 ?? aircraft.callsign;
-      const inConflict = conflictKeys.has(key);
+      const key = aircraftKey(aircraft);
+      const inConflict = isInConflict(aircraft, conflictKeys);
+      const selected = selectedAircraftKey === key;
 
       return `
-        <tr class="${inConflict ? "conflict" : ""}">
+        <tr class="${inConflict ? "conflict" : ""} ${selected ? "selected" : ""}" data-key="${escapeHtml(key)}">
           <td>${escapeHtml(aircraft.callsign)}</td>
           <td>${formatNumber(aircraft.latitude, 4)}</td>
           <td>${formatNumber(aircraft.longitude, 4)}</td>
@@ -205,6 +331,43 @@
     }).join("");
 
     tableBody.innerHTML = rowsHtml;
+  }
+
+  function renderConflictsTable(conflictsData) {
+    if (!Array.isArray(conflictsData) || conflictsData.length === 0) {
+      conflictsTableBody.innerHTML =
+        '<tr><td colspan="3" class="empty-state">No conflicts.</td></tr>';
+      return;
+    }
+
+    conflictsTableBody.innerHTML = conflictsData.map(c => {
+      const a = c.callsignA ?? c.aircraftAId ?? "A";
+      const b = c.callsignB ?? c.aircraftBId ?? "B";
+      return `<tr class="conflict">
+        <td>${escapeHtml(a)} / ${escapeHtml(b)}</td>
+        <td>${formatNumber(c.horizontalDistNm, 2)} NM</td>
+        <td>${formatNumber(c.verticalDistFt, 0)} ft</td>
+      </tr>`;
+    }).join("");
+  }
+
+  function renderCommandsTable(commandsData) {
+    if (!Array.isArray(commandsData) || commandsData.length === 0) {
+      commandsTableBody.innerHTML =
+        '<tr><td colspan="4" class="empty-state">No commands yet.</td></tr>';
+      return;
+    }
+
+    commandsTableBody.innerHTML = commandsData.map(cmd => {
+      const issued = cmd.issuedAt ? new Date(cmd.issuedAt).toLocaleTimeString() : "—";
+      const suffix = cmd.commandType === "Altitude" ? " FL" : cmd.commandType === "Heading" ? "°" : "";
+      return `<tr>
+        <td>${escapeHtml(cmd.callsign)}</td>
+        <td>${escapeHtml(cmd.commandType)}</td>
+        <td>${formatNumber(cmd.value, 1)}${suffix}</td>
+        <td>${escapeHtml(issued)}</td>
+      </tr>`;
+    }).join("");
   }
 
   function formatNumber(value, decimals) {
@@ -220,52 +383,262 @@
       .replace(/>/g, "&gt;");
   }
 
+  function isInConflict(aircraft, conflictKeys) {
+    return [aircraft.aircraftId, aircraft.icao24, aircraft.callsign]
+      .filter(v => v !== undefined && v !== null)
+      .some(id => conflictKeys.has(id) || conflictKeys.has(String(id)));
+  }
+
   /**
    * Extracts a Set of aircraft identifiers currently in conflict
-   * from the conflicts endpoint payload. Handles a couple of
-   * plausible shapes defensively — adjust to match the real API.
+   * from the conflicts endpoint payload.
    */
   function extractConflictKeys(conflictsData) {
     const keys = new Set();
     if (!Array.isArray(conflictsData)) return keys;
 
     conflictsData.forEach(conflict => {
-      // Common shapes: { aircraft1Id, aircraft2Id } or
-      // { aircraftAIcao24, aircraftBIcao24 } or a callsign pair.
       const candidates = [
+        conflict.aircraftAId, conflict.aircraftBId,
         conflict.aircraft1Id, conflict.aircraft2Id,
         conflict.aircraftAIcao24, conflict.aircraftBIcao24,
         conflict.icao24A, conflict.icao24B,
         conflict.callsignA, conflict.callsignB
       ].filter(v => v !== undefined && v !== null);
 
-      candidates.forEach(id => keys.add(id));
+      candidates.forEach(id => {
+        keys.add(id);
+        keys.add(String(id));
+      });
     });
 
     return keys;
   }
 
+  async function initMap() {
+    const imagery = await Cesium.TileMapServiceImageryProvider.fromUrl(
+      Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+    );
+
+    viewer = new Cesium.Viewer("map3d", {
+      animation: false,
+      timeline: false,
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: true,
+      baseLayerPicker: false,
+      navigationHelpButton: false,
+      fullscreenButton: true,
+      infoBox: true,
+      selectionIndicator: true,
+      baseLayer: new Cesium.ImageryLayer(imagery)
+    });
+
+    viewer.scene.globe.enableLighting = true;
+    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#0f1420");
+    viewer.scene.fog.enabled = false;
+    viewer.clock.shouldAnimate = false;
+
+    viewer.selectedEntityChanged.addEventListener(entity => {
+      if (!entity || !entity.id) return;
+      const prefix = "ac-";
+      if (String(entity.id).startsWith(prefix)) {
+        selectedAircraftKey = String(entity.id).slice(prefix.length);
+      }
+    });
+  }
+
+  function appendTrail(key, position) {
+    const points = trails.get(key) ?? [];
+    const last = points[points.length - 1];
+    if (!last || Cesium.Cartesian3.distance(last, position) > 15) {
+      points.push(position);
+      if (points.length > MAX_TRAIL_POINTS) points.shift();
+      trails.set(key, points);
+    }
+    return points;
+  }
+
+  function renderAircraftMap(data, conflictKeys = new Set()) {
+    if (!viewer) return;
+
+    const seen = new Set();
+    const positionsForFit = [];
+
+    if (!Array.isArray(data) || data.length === 0) {
+      viewer.entities.removeAll();
+      trails.clear();
+      return;
+    }
+
+    data.forEach(aircraft => {
+      const lat = Number(aircraft.latitude);
+      const lon = Number(aircraft.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      const key = aircraftKey(aircraft);
+      seen.add(key);
+      const altM = Math.max(Number(aircraft.altitude) || 0, 0) * FT_TO_M;
+      const heading = Number(aircraft.heading) || 0;
+      const inConflict = isInConflict(aircraft, conflictKeys);
+      const color = inConflict
+        ? Cesium.Color.fromCssColorString("#ef4444")
+        : Cesium.Color.fromCssColorString("#38bdf8");
+
+      const position = Cesium.Cartesian3.fromDegrees(lon, lat, altM);
+      const ground = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+      positionsForFit.push(position);
+      const trail = appendTrail(key, position);
+
+      const headingRad = Cesium.Math.toRadians(heading);
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        position,
+        new Cesium.HeadingPitchRoll(headingRad, 0, 0)
+      );
+
+      const entityId = `ac-${key}`;
+      let entity = viewer.entities.getById(entityId);
+      if (!entity) {
+        entity = viewer.entities.add({
+          id: entityId,
+          name: aircraft.callsign,
+          position,
+          orientation,
+          billboard: {
+            image: PLANE_ICON,
+            width: 36,
+            height: 36,
+            alignedAxis: Cesium.Cartesian3.UNIT_Z,
+            rotation: -headingRad,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          box: {
+            dimensions: new Cesium.Cartesian3(900, 220, 90),
+            material: color,
+            outline: true,
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.35)
+          },
+          polyline: {
+            positions: [ground, position],
+            width: 1.5,
+            material: color.withAlpha(0.45)
+          },
+          path: undefined,
+          label: {
+            text: `${aircraft.callsign}\n${formatNumber(aircraft.altitude, 0)} ft  ${formatNumber(heading, 0)}°`,
+            font: "12px sans-serif",
+            fillColor: Cesium.Color.WHITE,
+            showBackground: true,
+            backgroundColor: Cesium.Color.BLACK.withAlpha(0.55),
+            pixelOffset: new Cesium.Cartesian2(0, -36),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        });
+
+        viewer.entities.add({
+          id: `trail-${key}`,
+          polyline: {
+            positions: trail.slice(),
+            width: 2.5,
+            material: color.withAlpha(0.75)
+          }
+        });
+      } else {
+        entity.position = position;
+        entity.orientation = orientation;
+        entity.name = aircraft.callsign;
+        entity.billboard.rotation = -headingRad;
+        entity.billboard.color = color;
+        entity.box.material = color;
+        entity.polyline.positions = [ground, position];
+        entity.polyline.material = color.withAlpha(0.45);
+        entity.label.text = `${aircraft.callsign}\n${formatNumber(aircraft.altitude, 0)} ft  ${formatNumber(heading, 0)}°`;
+        const trailEntity = viewer.entities.getById(`trail-${key}`);
+        if (trailEntity) {
+          trailEntity.polyline.positions = trail.slice();
+          trailEntity.polyline.material = color.withAlpha(0.75);
+        }
+      }
+    });
+
+    [...viewer.entities.values].forEach(entity => {
+      const id = String(entity.id || "");
+      if (id.startsWith("ac-") && !seen.has(id.slice(3))) {
+        const trailEntity = viewer.entities.getById(`trail-${id.slice(3)}`);
+        if (trailEntity) viewer.entities.remove(trailEntity);
+        viewer.entities.remove(entity);
+        trails.delete(id.slice(3));
+      }
+    });
+
+    if (!didFitCamera && positionsForFit.length) {
+      fitAllTraffic();
+      didFitCamera = true;
+    } else if (followTraffic.checked && positionsForFit.length) {
+      fitAllTraffic();
+    }
+
+    if (selectedAircraftKey) {
+      const selected = viewer.entities.getById(`ac-${selectedAircraftKey}`);
+      if (selected) viewer.selectedEntity = selected;
+    }
+  }
+
+  function fitAllTraffic() {
+    if (!viewer) return;
+    const aircraftEntities = viewer.entities.values.filter(e => String(e.id || "").startsWith("ac-"));
+    if (!aircraftEntities.length) return;
+    viewer.flyTo(aircraftEntities, {
+      duration: 1.2,
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-35), 0)
+    });
+  }
+
+  function focusAircraft(key) {
+    selectedAircraftKey = key;
+    const entity = viewer && viewer.entities.getById(`ac-${key}`);
+    if (!entity) return;
+    viewer.selectedEntity = entity;
+    viewer.flyTo(entity, {
+      duration: 0.8,
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-40), 18000)
+    });
+  }
+
+  function resetMap() {
+    didFitCamera = false;
+    selectedAircraftKey = null;
+    trails.clear();
+    if (viewer) viewer.entities.removeAll();
+  }
+
   /**
    * Fetches current aircraft + conflicts for the active run,
-   * cross-references them, and renders the table.
+   * cross-references them, and renders the table and 3D map.
    */
   async function pollAircraft() {
     if (!currentRunId) return;
 
     try {
-      const [aircraftRes, conflictsRes] = await Promise.all([
+      const [aircraftRes, conflictsRes, commandsRes] = await Promise.all([
         fetch(`${API_BASE}/${currentRunId}/aircraft`),
-        fetch(`${API_BASE}/${currentRunId}/conflicts`)
+        fetch(`${API_BASE}/${currentRunId}/conflicts`),
+        fetch(`${API_BASE}/${currentRunId}/commands`)
       ]);
 
       if (!aircraftRes.ok) throw new Error(`Aircraft fetch failed (${aircraftRes.status})`);
       if (!conflictsRes.ok) throw new Error(`Conflicts fetch failed (${conflictsRes.status})`);
+      if (!commandsRes.ok) throw new Error(`Commands fetch failed (${commandsRes.status})`);
 
       const aircraftData = await aircraftRes.json();
       const conflictsData = await conflictsRes.json();
+      const commandsData = await commandsRes.json();
 
       const conflictKeys = extractConflictKeys(conflictsData);
       renderAircraftTable(aircraftData, conflictKeys);
+      renderAircraftMap(aircraftData, conflictKeys);
+      renderConflictsTable(conflictsData);
+      renderCommandsTable(commandsData);
       clearError();
     } catch (err) {
       console.error(err);
@@ -274,8 +647,8 @@
   }
 
   function startPolling() {
-    stopPolling(); // guard against double timers
-    pollAircraft(); // immediate first fetch, don't wait 3s
+    stopPolling();
+    pollAircraft();
     pollTimerId = setInterval(pollAircraft, POLL_INTERVAL_MS);
   }
 
@@ -289,12 +662,16 @@
   async function startRun() {
     startBtn.disabled = true;
     try {
-      const res = await fetch(API_BASE, { method: "POST" });
+      const res = await fetch(API_BASE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
       if (!res.ok) throw new Error(`Start run failed (${res.status})`);
       const run = await res.json();
-      // Adjust field name below ('id') to match the actual API response shape.
       const runId = run.id ?? run.runId ?? run.simulationRunId;
 
+      resetMap();
       setRunningUI(runId);
       clearError();
       startPolling();
@@ -324,6 +701,22 @@
 
   startBtn.addEventListener("click", startRun);
   stopBtn.addEventListener("click", stopRun);
+  fitViewBtn.addEventListener("click", fitAllTraffic);
+  tableBody.addEventListener("click", (event) => {
+    const row = event.target.closest("tr[data-key]");
+    if (!row) return;
+    focusAircraft(row.getAttribute("data-key"));
+  });
+
+  initMap().catch(err => {
+    console.error(err);
+    showError(`Could not load 3D map: ${err.message}`);
+  });
+
+  window.addEventListener("beforeunload", () => {
+    stopPolling();
+    if (viewer && !viewer.isDestroyed()) viewer.destroy();
+  });
 </script>
 </body>
 </html>
