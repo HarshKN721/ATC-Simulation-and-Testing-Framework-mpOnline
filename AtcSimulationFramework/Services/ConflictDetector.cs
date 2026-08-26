@@ -35,7 +35,7 @@ public class ConflictDetector
                         AircraftAId = a.AircraftId,
                         AircraftBId = b.AircraftId,
                         DetectedAt = DateTime.UtcNow,
-                        HorizontalDistNm = Math.Round(horizontalDist, 3),
+                        HorizontalDistNm = (decimal)Math.Round(horizontalDist, 3),
                         VerticalDistFt = verticalDist
                     });
                 }

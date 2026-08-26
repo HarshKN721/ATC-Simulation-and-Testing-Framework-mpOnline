@@ -23,7 +23,7 @@ public class ConflictDetectorTests
         Assert.Equal(10, conflicts[0].RunId);
         Assert.Equal(1, conflicts[0].AircraftAId);
         Assert.Equal(2, conflicts[0].AircraftBId);
-        Assert.True(conflicts[0].HorizontalDistNm < 5.0);
+        Assert.True(conflicts[0].HorizontalDistNm < 5.0m);
         Assert.True(conflicts[0].VerticalDistFt < 1000);
     }
 
