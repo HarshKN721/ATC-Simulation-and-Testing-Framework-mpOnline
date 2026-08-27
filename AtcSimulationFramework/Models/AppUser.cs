@@ -9,6 +9,7 @@ public class AppUser
     public string Username { get; set; } = string.Empty;
     public byte[] PasswordHash { get; set; } = Array.Empty<byte>();
     public string Role { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation properties
     public ICollection<SimulationRun> SimulationRuns { get; set; } = new List<SimulationRun>();
