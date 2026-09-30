@@ -3,173 +3,540 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ATC Simulation Dashboard</title>
+<title>ATC Operations Center — Simulation Dashboard</title>
+<meta name="description" content="Real-time Air Traffic Control simulation dashboard with 3D radar view, conflict detection, and automated vectoring." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css" />
 <style>
+  /* ============================================================
+     DESIGN TOKENS
+     ============================================================ */
   :root {
-    --bg: #0f1420;
-    --panel: #161d2e;
-    --border: #2a3350;
-    --text: #e6e9f0;
-    --muted: #8b93a7;
+    --bg-base: #080c14;
+    --bg-surface: rgba(14, 20, 35, 0.75);
+    --bg-elevated: rgba(22, 30, 52, 0.65);
+    --glass-border: rgba(56, 80, 130, 0.35);
+    --glass-blur: 18px;
+    --text-primary: #e8ecf4;
+    --text-secondary: #8b95b0;
+    --text-muted: #5a6480;
     --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.25);
+    --accent-gradient: linear-gradient(135deg, #3b82f6, #06b6d4);
     --danger: #ef4444;
-    --danger-bg: rgba(239, 68, 68, 0.18);
-    --ok: #22c55e;
+    --danger-soft: rgba(239, 68, 68, 0.15);
+    --danger-glow: rgba(239, 68, 68, 0.35);
+    --success: #22c55e;
+    --success-soft: rgba(34, 197, 94, 0.15);
+    --warning: #f59e0b;
+    --warning-soft: rgba(245, 158, 11, 0.15);
+    --cyan: #06b6d4;
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    padding: 24px;
-  }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px 20px;
+  /* ============================================================
+     RESET & BASE
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Ambient glow behind the page */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -40%; left: -20%;
+    width: 80%; height: 80%;
+    background: radial-gradient(ellipse, rgba(59,130,246,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -30%; right: -15%;
+    width: 60%; height: 60%;
+    background: radial-gradient(ellipse, rgba(6,182,212,0.04) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  .app {
+    position: relative;
+    z-index: 1;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px 24px 40px;
+  }
+
+  /* ============================================================
+     HEADER
+     ============================================================ */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
     margin-bottom: 20px;
   }
-
-  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-
-  button {
-    padding: 9px 16px;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    font-size: 14px;
+  .header-logo {
+    width: 44px; height: 44px;
+    background: var(--accent-gradient);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    box-shadow: 0 0 20px var(--accent-glow);
+    flex-shrink: 0;
+  }
+  .header-text h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header-text p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .header-clock {
+    margin-left: auto;
+    text-align: right;
+  }
+  .header-clock .time {
+    font-family: var(--mono);
+    font-size: 20px;
     font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
+    color: var(--text-primary);
   }
-  button:disabled { opacity: 0.45; cursor: not-allowed; }
-
-  #startBtn { background: var(--ok); color: #06210f; }
-  #stopBtn { background: var(--danger); color: #2b0505; }
-  .map-btn { background: #243049; color: var(--text); border: 1px solid var(--border); }
-
-  .run-id { font-size: 13px; color: var(--muted); margin-left: auto; }
-  .status-dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-    background: var(--muted);
+  .header-clock .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
   }
-  .status-dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 
-  .map-header {
+  /* ============================================================
+     GLASS PANEL
+     ============================================================ */
+  .panel {
+    background: var(--bg-surface);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    transition: border-color 0.3s ease;
+  }
+  .panel:hover { border-color: rgba(56, 80, 130, 0.55); }
+
+  /* ============================================================
+     STAT CARDS
+     ============================================================ */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .stat-card {
+    background: var(--bg-elevated);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, border-color 0.3s ease;
+  }
+  .stat-card:hover { transform: translateY(-2px); border-color: rgba(56,80,130,0.55); }
+  .stat-card .stat-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+  .stat-card .stat-icon.blue   { background: var(--accent-glow);  }
+  .stat-card .stat-icon.red    { background: var(--danger-soft);   }
+  .stat-card .stat-icon.green  { background: var(--success-soft);  }
+  .stat-card .stat-icon.amber  { background: var(--warning-soft);  }
+  .stat-card .stat-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-card .stat-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  /* subtle animated shine */
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 50%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+    animation: shine 4s ease-in-out infinite;
+  }
+  @keyframes shine { 0%{left:-100%} 50%{left:150%} 100%{left:150%} }
+
+  /* ============================================================
+     CONTROLS BAR
+     ============================================================ */
+  .controls {
     display: flex;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
-    margin-bottom: 12px;
   }
-  .map-header h2 { font-size: 14px; margin: 0; font-weight: 600; }
-  .map-header .hint { color: var(--muted); font-size: 12px; }
-  .map-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-left: auto; }
-  .legend-swatch {
-    display: inline-block;
+  button {
+    font-family: var(--font);
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button:active:not(:disabled) { transform: scale(0.97); }
+
+  #startBtn {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: #052e0f;
+    box-shadow: 0 0 16px rgba(34,197,94,0.25);
+  }
+  #startBtn:hover:not(:disabled) { box-shadow: 0 0 24px rgba(34,197,94,0.4); }
+
+  #stopBtn {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: #2b0505;
+    box-shadow: 0 0 16px rgba(239,68,68,0.2);
+  }
+  #stopBtn:hover:not(:disabled) { box-shadow: 0 0 24px rgba(239,68,68,0.4); }
+
+  .map-btn {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--glass-border);
+  }
+  .map-btn:hover:not(:disabled) { border-color: var(--accent); }
+
+  .run-info {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .status-dot {
     width: 10px; height: 10px;
     border-radius: 50%;
-    margin-right: 6px;
-    vertical-align: middle;
+    background: var(--text-muted);
+    transition: all 0.3s ease;
   }
-  .legend-swatch.ok { background: #38bdf8; }
-  .legend-swatch.conflict { background: var(--danger); }
+  .status-dot.live {
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success), 0 0 20px rgba(34,197,94,0.3);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { box-shadow: 0 0 8px var(--success), 0 0 20px rgba(34,197,94,0.3); }
+    50% { box-shadow: 0 0 12px var(--success), 0 0 30px rgba(34,197,94,0.5); }
+  }
+
+  /* ============================================================
+     MAP
+     ============================================================ */
+  .map-header {
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .map-header h2 { font-size: 15px; font-weight: 700; margin: 0; }
+  .map-header .hint { color: var(--text-muted); font-size: 12px; }
+  .map-legend {
+    display: flex; gap: 16px; font-size: 12px;
+    color: var(--text-secondary); margin-left: auto;
+  }
+  .legend-swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 5px; vertical-align: middle;
+  }
+  .legend-swatch.ok { background: var(--cyan); box-shadow: 0 0 6px rgba(6,182,212,0.4); }
+  .legend-swatch.conflict { background: var(--danger); box-shadow: 0 0 6px var(--danger-glow); }
 
   label.follow {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--muted);
-    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-secondary); cursor: pointer;
   }
 
   #map3d {
-    height: 540px;
+    height: 560px;
     width: 100%;
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
-    border: 1px solid var(--border);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.3);
+  }
+  .cesium-viewer-bottom, .cesium-widget-credits { display: none !important; }
+
+  /* ============================================================
+     BOTTOM GRID: tables side-by-side
+     ============================================================ */
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .bottom-grid .panel.full-width {
+    grid-column: 1 / -1;
   }
 
-  .cesium-viewer-bottom { display: none; }
-  .cesium-widget-credits { display: none !important; }
+  /* ============================================================
+     TABLES
+     ============================================================ */
+  .section-title {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px;
+  }
+  .section-title h2 {
+    font-size: 15px; font-weight: 700; margin: 0;
+  }
+  .section-title .badge {
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--accent-glow);
+    color: var(--accent);
+  }
+  .section-title .badge.danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    animation: pulse-badge 2s ease-in-out infinite;
+  }
+  @keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .section-title .hint {
+    font-size: 12px; color: var(--text-muted); margin-left: auto;
+  }
 
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
     text-align: left;
-    color: var(--muted);
+    color: var(--text-muted);
     font-weight: 600;
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.06em;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--glass-border);
   }
   tbody td {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(56,80,130,0.15);
+    transition: background 0.2s ease;
   }
-  tbody tr.conflict {
-    background: var(--danger-bg);
-    color: #fecaca;
+  tbody tr {
+    transition: background 0.2s ease;
   }
-  tbody tr.conflict td:first-child { font-weight: 700; }
-  tbody tr:hover { background: rgba(255,255,255,0.03); cursor: pointer; }
-  tbody tr.selected { outline: 1px solid var(--accent); }
+  tbody tr:hover { background: rgba(255,255,255,0.02); cursor: pointer; }
+  tbody tr.selected { outline: 1px solid var(--accent); border-radius: 4px; }
+
+  /* Conflict row styling */
+  tbody tr.conflict-row {
+    background: var(--danger-soft);
+    animation: conflict-flash 3s ease-in-out infinite;
+  }
+  tbody tr.conflict-row td:first-child { font-weight: 700; color: #fca5a5; }
+  @keyframes conflict-flash {
+    0%, 100% { background: var(--danger-soft); }
+    50% { background: rgba(239, 68, 68, 0.08); }
+  }
 
   .empty-state {
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 13px;
-    padding: 20px 4px;
+    padding: 24px 4px;
     text-align: center;
   }
 
+  /* Mono-spaced data cells */
+  .mono { font-family: var(--mono); font-size: 12px; }
+
+  /* Command type badges */
+  .cmd-badge {
+    display: inline-block;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.03em;
+  }
+  .cmd-badge.heading { background: var(--accent-glow); color: var(--accent); }
+  .cmd-badge.altitude { background: var(--warning-soft); color: var(--warning); }
+
+  /* ============================================================
+     ERROR BANNER
+     ============================================================ */
   .error-banner {
-    background: var(--danger-bg);
-    color: #fecaca;
-    border: 1px solid var(--danger);
-    border-radius: 6px;
-    padding: 8px 12px;
+    background: var(--danger-soft);
+    color: #fca5a5;
+    border: 1px solid rgba(239,68,68,0.35);
+    border-radius: var(--radius-sm);
+    padding: 10px 16px;
     font-size: 13px;
     margin-bottom: 16px;
     display: none;
+    backdrop-filter: blur(8px);
+  }
+
+  /* ============================================================
+     TOAST NOTIFICATIONS
+     ============================================================ */
+  .toast-container {
+    position: fixed;
+    top: 20px; right: 20px;
+    z-index: 9999;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--bg-surface);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 12px 18px;
+    font-size: 13px;
+    color: var(--text-primary);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    display: flex; align-items: center; gap: 10px;
+    animation: toast-in 0.35s ease-out forwards;
+    pointer-events: auto;
+    max-width: 380px;
+  }
+  .toast.out { animation: toast-out 0.3s ease-in forwards; }
+  .toast .toast-icon { font-size: 18px; flex-shrink: 0; }
+  .toast.danger { border-left: 3px solid var(--danger); }
+  .toast.success { border-left: 3px solid var(--success); }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes toast-out {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(40px); }
+  }
+
+  /* ============================================================
+     RESPONSIVE
+     ============================================================ */
+  @media (max-width: 1100px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .bottom-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .stats-row { grid-template-columns: 1fr; }
+    .app { padding: 12px; }
+    #map3d { height: 360px; }
   }
 </style>
 </head>
 <body>
 
-  <h1>ATC Simulation Dashboard</h1>
-  <div class="subtitle">3D navigation map + table view, polled every 3 seconds.</div>
+<div class="app">
+  <!-- ============================================================
+       HEADER
+       ============================================================ -->
+  <header class="header">
+    <div class="header-logo">✈</div>
+    <div class="header-text">
+      <h1>ATC Operations Center</h1>
+      <p>Real-time air traffic simulation with automated conflict resolution</p>
+    </div>
+    <div class="header-clock">
+      <div class="time" id="clockDisplay">00:00:00</div>
+      <div class="label">Simulation Time</div>
+    </div>
+  </header>
 
   <div class="error-banner" id="errorBanner"></div>
 
-  <div class="panel controls">
-    <button id="startBtn">Start Run</button>
-    <button id="stopBtn" disabled>Stop Run</button>
-    <span class="run-id">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="runIdLabel">No active run</span>
-    </span>
+  <!-- ============================================================
+       STAT CARDS
+       ============================================================ -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-icon blue">🛩</div>
+      <div class="stat-value" id="statAircraft">0</div>
+      <div class="stat-label">Aircraft Tracked</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon red">⚠</div>
+      <div class="stat-value" id="statConflicts">0</div>
+      <div class="stat-label">Active Conflicts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">✓</div>
+      <div class="stat-value" id="statCommands">0</div>
+      <div class="stat-label">Commands Issued</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon amber">⏱</div>
+      <div class="stat-value" id="statUptime">0s</div>
+      <div class="stat-label">Run Duration</div>
+    </div>
   </div>
 
+  <!-- ============================================================
+       CONTROLS
+       ============================================================ -->
+  <div class="panel controls">
+    <button id="startBtn">▶ Start Run</button>
+    <button id="stopBtn" disabled>■ Stop Run</button>
+    <label class="follow">
+      <input type="checkbox" id="followTraffic" />
+      Follow traffic
+    </label>
+    <button type="button" class="map-btn" id="fitViewBtn">⊞ Fit All</button>
+    <div class="run-info">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="runIdLabel">No active run</span>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       3D MAP
+       ============================================================ -->
   <div class="panel">
     <div class="map-header">
-      <h2>3D navigation map</h2>
-      <span class="hint">Drag to orbit · scroll to zoom · click an aircraft or table row to focus</span>
-      <label class="follow">
-        <input type="checkbox" id="followTraffic" />
-        Follow traffic
-      </label>
-      <button type="button" class="map-btn" id="fitViewBtn">Fit all</button>
+      <h2>🗺 3D Navigation Radar</h2>
+      <span class="hint">Drag to orbit · scroll to zoom · click an aircraft to focus</span>
       <div class="map-legend">
         <span><span class="legend-swatch ok"></span>Clear</span>
         <span><span class="legend-swatch conflict"></span>Conflict</span>
@@ -178,63 +545,89 @@
     <div id="map3d"></div>
   </div>
 
-  <div class="panel">
-    <table>
-      <thead>
-        <tr>
-          <th>Callsign</th>
-          <th>Latitude</th>
-          <th>Longitude</th>
-          <th>Altitude</th>
-          <th>Heading</th>
-          <th>Speed</th>
-        </tr>
-      </thead>
-      <tbody id="aircraftTableBody">
-        <tr><td colspan="6" class="empty-state">No aircraft data yet. Start a run to begin polling.</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <!-- ============================================================
+       BOTTOM GRID: Aircraft + Conflicts + Commands
+       ============================================================ -->
+  <div class="bottom-grid">
 
-  <div class="panel">
-    <div class="map-header">
-      <h2>Active conflicts</h2>
-      <span class="hint">Live separation violations from the latest positions</span>
+    <!-- Aircraft Table -->
+    <div class="panel full-width">
+      <div class="section-title">
+        <h2>Aircraft Status</h2>
+        <span class="badge" id="aircraftBadge">0</span>
+        <span class="hint">Live telemetry from all tracked aircraft</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Callsign</th>
+            <th>ICAO24</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Altitude</th>
+            <th>Heading</th>
+            <th>Speed</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="aircraftTableBody">
+          <tr><td colspan="8" class="empty-state">No aircraft data yet. Start a run to begin.</td></tr>
+        </tbody>
+      </table>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Pair</th>
-          <th>Horizontal</th>
-          <th>Vertical</th>
-        </tr>
-      </thead>
-      <tbody id="conflictsTableBody">
-        <tr><td colspan="3" class="empty-state">No conflicts.</td></tr>
-      </tbody>
-    </table>
-  </div>
 
-  <div class="panel">
-    <div class="map-header">
-      <h2>Vector commands</h2>
-      <span class="hint">Issued by the automated controller (altitude values are flight level)</span>
+    <!-- Conflicts Table -->
+    <div class="panel">
+      <div class="section-title">
+        <h2>⚠ Active Conflicts</h2>
+        <span class="badge danger" id="conflictBadge" style="display:none">0</span>
+        <span class="hint">Separation violations</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Aircraft Pair</th>
+            <th>Horizontal</th>
+            <th>Vertical</th>
+          </tr>
+        </thead>
+        <tbody id="conflictsTableBody">
+          <tr><td colspan="3" class="empty-state">No conflicts — all clear.</td></tr>
+        </tbody>
+      </table>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Callsign</th>
-          <th>Type</th>
-          <th>Value</th>
-          <th>Issued</th>
-        </tr>
-      </thead>
-      <tbody id="commandsTableBody">
-        <tr><td colspan="4" class="empty-state">No commands yet.</td></tr>
-      </tbody>
-    </table>
-  </div>
 
+    <!-- Commands Table -->
+    <div class="panel">
+      <div class="section-title">
+        <h2>📡 Vector Commands</h2>
+        <span class="badge" id="commandsBadge">0</span>
+        <span class="hint">Automated controller actions</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Callsign</th>
+            <th>Type</th>
+            <th>Value</th>
+            <th>Issued At</th>
+          </tr>
+        </thead>
+        <tbody id="commandsTableBody">
+          <tr><td colspan="4" class="empty-state">No commands yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div><!-- /bottom-grid -->
+</div><!-- /app -->
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
 <script>
   window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/";
 </script>
@@ -244,21 +637,38 @@
   // ---- Config ----
   const API_BASE = "/api/simulationruns";
   const POLL_INTERVAL_MS = 3000;
-  const MAX_TRAIL_POINTS = 80;
+  const MAX_TRAIL_POINTS = 120;
   const FT_TO_M = 0.3048;
 
   // ---- State ----
   let currentRunId = null;
   let pollTimerId = null;
+  let clockTimerId = null;
+  let runStartTime = null;
   let viewer = null;
   let didFitCamera = false;
   let selectedAircraftKey = null;
+  let prevConflictCount = 0;
   const trails = new Map();
 
+  // ---- Plane icon SVG ----
   const PLANE_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
-      <g fill="#e6e9f0" stroke="#0f1420" stroke-width="1">
-        <polygon points="24,4 28,22 44,28 28,30 24,44 20,30 4,28 20,22"/>
+      <defs>
+        <linearGradient id="pg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#e6e9f0"/>
+          <stop offset="100%" stop-color="#a0b0d0"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#pg)" stroke="#0f1420" stroke-width="1.5">
+        <polygon points="24,2 29,20 46,26 29,29 24,46 19,29 2,26 19,20"/>
+      </g>
+    </svg>`);
+
+  const PLANE_CONFLICT_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <g fill="#ef4444" stroke="#2b0505" stroke-width="1.5">
+        <polygon points="24,2 29,20 46,26 29,29 24,46 19,29 2,26 19,20"/>
       </g>
     </svg>`);
 
@@ -273,177 +683,210 @@
   const errorBanner = document.getElementById("errorBanner");
   const followTraffic = document.getElementById("followTraffic");
   const fitViewBtn = document.getElementById("fitViewBtn");
+  const toastContainer = document.getElementById("toastContainer");
+  const clockDisplay = document.getElementById("clockDisplay");
 
-  function showError(message) {
-    errorBanner.textContent = message;
-    errorBanner.style.display = "block";
-  }
+  // Stat elements
+  const statAircraft = document.getElementById("statAircraft");
+  const statConflicts = document.getElementById("statConflicts");
+  const statCommands = document.getElementById("statCommands");
+  const statUptime = document.getElementById("statUptime");
+  const aircraftBadge = document.getElementById("aircraftBadge");
+  const conflictBadge = document.getElementById("conflictBadge");
+  const commandsBadge = document.getElementById("commandsBadge");
 
-  function clearError() {
-    errorBanner.style.display = "none";
-    errorBanner.textContent = "";
-  }
-
-  function setRunningUI(runId) {
-    currentRunId = runId;
-    runIdLabel.textContent = runId ? `Run #${runId} — polling every 3s` : "No active run";
-    statusDot.classList.toggle("live", !!runId);
-    startBtn.disabled = !!runId;
-    stopBtn.disabled = !runId;
-  }
-
-  function aircraftKey(aircraft) {
-    return String(aircraft.aircraftId ?? aircraft.icao24 ?? aircraft.callsign);
-  }
-
-  /**
-   * Single reusable function for rendering the aircraft table.
-   * Called every time new polling data arrives — never duplicate
-   * table-building markup anywhere else.
-   *
-   * @param {Array<Object>} data - array of aircraft objects
-   *   Expected shape:
-   *   { callsign, latitude, longitude, altitude, heading, speed, icao24, aircraftId }
-   * @param {Set<string>} conflictKeys - set of aircraft identifiers
-   *   currently involved in a conflict
-   */
-  function renderAircraftTable(data, conflictKeys = new Set()) {
-    if (!Array.isArray(data) || data.length === 0) {
-      tableBody.innerHTML =
-        '<tr><td colspan="6" class="empty-state">No aircraft currently in this run.</td></tr>';
-      return;
-    }
-
-    const rowsHtml = data.map(aircraft => {
-      const key = aircraftKey(aircraft);
-      const inConflict = isInConflict(aircraft, conflictKeys);
-      const selected = selectedAircraftKey === key;
-
-      return `
-        <tr class="${inConflict ? "conflict" : ""} ${selected ? "selected" : ""}" data-key="${escapeHtml(key)}">
-          <td>${escapeHtml(aircraft.callsign)}</td>
-          <td>${formatNumber(aircraft.latitude, 4)}</td>
-          <td>${formatNumber(aircraft.longitude, 4)}</td>
-          <td>${formatNumber(aircraft.altitude, 0)} ft</td>
-          <td>${formatNumber(aircraft.heading, 0)}&deg;</td>
-          <td>${formatNumber(aircraft.speed, 0)} kt</td>
-        </tr>`;
-    }).join("");
-
-    tableBody.innerHTML = rowsHtml;
-  }
-
-  function renderConflictsTable(conflictsData) {
-    if (!Array.isArray(conflictsData) || conflictsData.length === 0) {
-      conflictsTableBody.innerHTML =
-        '<tr><td colspan="3" class="empty-state">No conflicts.</td></tr>';
-      return;
-    }
-
-    conflictsTableBody.innerHTML = conflictsData.map(c => {
-      const a = c.callsignA ?? c.aircraftAId ?? "A";
-      const b = c.callsignB ?? c.aircraftBId ?? "B";
-      return `<tr class="conflict">
-        <td>${escapeHtml(a)} / ${escapeHtml(b)}</td>
-        <td>${formatNumber(c.horizontalDistNm, 2)} NM</td>
-        <td>${formatNumber(c.verticalDistFt, 0)} ft</td>
-      </tr>`;
-    }).join("");
-  }
-
-  function renderCommandsTable(commandsData) {
-    if (!Array.isArray(commandsData) || commandsData.length === 0) {
-      commandsTableBody.innerHTML =
-        '<tr><td colspan="4" class="empty-state">No commands yet.</td></tr>';
-      return;
-    }
-
-    commandsTableBody.innerHTML = commandsData.map(cmd => {
-      const issued = cmd.issuedAt ? new Date(cmd.issuedAt).toLocaleTimeString() : "—";
-      const suffix = cmd.commandType === "Altitude" ? " FL" : cmd.commandType === "Heading" ? "°" : "";
-      return `<tr>
-        <td>${escapeHtml(cmd.callsign)}</td>
-        <td>${escapeHtml(cmd.commandType)}</td>
-        <td>${formatNumber(cmd.value, 1)}${suffix}</td>
-        <td>${escapeHtml(issued)}</td>
-      </tr>`;
-    }).join("");
-  }
+  // ---- Utilities ----
+  function showError(msg) { errorBanner.textContent = msg; errorBanner.style.display = "block"; }
+  function clearError() { errorBanner.style.display = "none"; errorBanner.textContent = ""; }
 
   function formatNumber(value, decimals) {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
     return Number(value).toFixed(decimals);
   }
-
   function escapeHtml(str) {
-    if (str === null || str === undefined) return "";
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    if (str == null) return "";
+    return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
+  function aircraftKey(ac) { return String(ac.aircraftId ?? ac.icao24 ?? ac.callsign); }
 
-  function isInConflict(aircraft, conflictKeys) {
-    return [aircraft.aircraftId, aircraft.icao24, aircraft.callsign]
-      .filter(v => v !== undefined && v !== null)
+  function isInConflict(ac, conflictKeys) {
+    return [ac.aircraftId, ac.icao24, ac.callsign]
+      .filter(v => v != null)
       .some(id => conflictKeys.has(id) || conflictKeys.has(String(id)));
   }
 
-  /**
-   * Extracts a Set of aircraft identifiers currently in conflict
-   * from the conflicts endpoint payload.
-   */
   function extractConflictKeys(conflictsData) {
     const keys = new Set();
     if (!Array.isArray(conflictsData)) return keys;
-
-    conflictsData.forEach(conflict => {
-      const candidates = [
-        conflict.aircraftAId, conflict.aircraftBId,
-        conflict.aircraft1Id, conflict.aircraft2Id,
-        conflict.aircraftAIcao24, conflict.aircraftBIcao24,
-        conflict.icao24A, conflict.icao24B,
-        conflict.callsignA, conflict.callsignB
-      ].filter(v => v !== undefined && v !== null);
-
-      candidates.forEach(id => {
-        keys.add(id);
-        keys.add(String(id));
-      });
+    conflictsData.forEach(c => {
+      [c.aircraftAId, c.aircraftBId, c.callsignA, c.callsignB]
+        .filter(v => v != null)
+        .forEach(id => { keys.add(id); keys.add(String(id)); });
     });
-
     return keys;
   }
 
+  // ---- Toast Notifications ----
+  function showToast(message, type = "success") {
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+    const icon = type === "danger" ? "🚨" : "✅";
+    toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${escapeHtml(message)}</span>`;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add("out");
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  // ---- Clock ----
+  function updateClock() {
+    if (!runStartTime) { clockDisplay.textContent = "00:00:00"; return; }
+    const elapsed = Math.floor((Date.now() - runStartTime) / 1000);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
+    clockDisplay.textContent = `${h}:${m}:${s}`;
+    statUptime.textContent = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed/60)}m ${elapsed%60}s`;
+  }
+
+  // ---- UI state ----
+  function setRunningUI(runId) {
+    currentRunId = runId;
+    runIdLabel.textContent = runId ? `Run #${runId} — live` : "No active run";
+    statusDot.classList.toggle("live", !!runId);
+    startBtn.disabled = !!runId;
+    stopBtn.disabled = !runId;
+    if (runId) {
+      runStartTime = Date.now();
+      clockTimerId = setInterval(updateClock, 1000);
+    } else {
+      runStartTime = null;
+      if (clockTimerId) { clearInterval(clockTimerId); clockTimerId = null; }
+    }
+  }
+
+  // ---- Update Stats ----
+  function updateStats(aircraftCount, conflictCount, commandCount) {
+    animateValue(statAircraft, aircraftCount);
+    animateValue(statConflicts, conflictCount);
+    animateValue(statCommands, commandCount);
+    aircraftBadge.textContent = aircraftCount;
+    commandsBadge.textContent = commandCount;
+
+    if (conflictCount > 0) {
+      conflictBadge.style.display = "inline";
+      conflictBadge.textContent = conflictCount;
+    } else {
+      conflictBadge.style.display = "none";
+    }
+
+    // Toast on new conflicts
+    if (conflictCount > prevConflictCount && prevConflictCount >= 0) {
+      const diff = conflictCount - prevConflictCount;
+      showToast(`${diff} new conflict${diff > 1 ? "s" : ""} detected!`, "danger");
+    } else if (conflictCount < prevConflictCount && prevConflictCount > 0) {
+      const resolved = prevConflictCount - conflictCount;
+      showToast(`${resolved} conflict${resolved > 1 ? "s" : ""} resolved`, "success");
+    }
+    prevConflictCount = conflictCount;
+  }
+
+  function animateValue(el, newVal) {
+    const current = parseInt(el.textContent) || 0;
+    if (current === newVal) return;
+    el.textContent = newVal;
+    el.style.transform = "scale(1.15)";
+    el.style.transition = "transform 0.2s ease";
+    setTimeout(() => { el.style.transform = "scale(1)"; }, 200);
+  }
+
+  // ---- Aircraft Table ----
+  function renderAircraftTable(data, conflictKeys = new Set()) {
+    if (!Array.isArray(data) || data.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="8" class="empty-state">No aircraft currently in this run.</td></tr>';
+      return;
+    }
+    tableBody.innerHTML = data.map(ac => {
+      const key = aircraftKey(ac);
+      const inConflict = isInConflict(ac, conflictKeys);
+      const selected = selectedAircraftKey === key;
+      const statusHtml = inConflict
+        ? '<span style="color:var(--danger);font-weight:600">⚠ CONFLICT</span>'
+        : '<span style="color:var(--success)">● Clear</span>';
+
+      return `<tr class="${inConflict ? "conflict-row" : ""} ${selected ? "selected" : ""}" data-key="${escapeHtml(key)}">
+        <td style="font-weight:600">${escapeHtml(ac.callsign)}</td>
+        <td class="mono" style="color:var(--text-muted)">${escapeHtml(ac.icao24 || "—")}</td>
+        <td class="mono">${formatNumber(ac.latitude, 4)}</td>
+        <td class="mono">${formatNumber(ac.longitude, 4)}</td>
+        <td class="mono">${formatNumber(ac.altitude, 0)} ft</td>
+        <td class="mono">${formatNumber(ac.heading, 0)}°</td>
+        <td class="mono">${formatNumber(ac.speed, 0)} kt</td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ---- Conflicts Table ----
+  function renderConflictsTable(conflictsData) {
+    if (!Array.isArray(conflictsData) || conflictsData.length === 0) {
+      conflictsTableBody.innerHTML = '<tr><td colspan="3" class="empty-state">No conflicts — all clear ✅</td></tr>';
+      return;
+    }
+    conflictsTableBody.innerHTML = conflictsData.map(c => {
+      const a = c.callsignA ?? c.aircraftAId ?? "A";
+      const b = c.callsignB ?? c.aircraftBId ?? "B";
+      return `<tr class="conflict-row">
+        <td style="font-weight:700">${escapeHtml(a)} ↔ ${escapeHtml(b)}</td>
+        <td class="mono">${formatNumber(c.horizontalDistNm, 2)} NM</td>
+        <td class="mono">${formatNumber(c.verticalDistFt, 0)} ft</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ---- Commands Table ----
+  function renderCommandsTable(commandsData) {
+    if (!Array.isArray(commandsData) || commandsData.length === 0) {
+      commandsTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">No commands yet.</td></tr>';
+      return;
+    }
+    commandsTableBody.innerHTML = commandsData.map(cmd => {
+      const issued = cmd.issuedAt ? new Date(cmd.issuedAt).toLocaleTimeString() : "—";
+      const typeClass = (cmd.commandType || "").toLowerCase();
+      const suffix = typeClass === "altitude" ? " FL" : typeClass === "heading" ? "°" : "";
+      return `<tr>
+        <td style="font-weight:600">${escapeHtml(cmd.callsign)}</td>
+        <td><span class="cmd-badge ${typeClass}">${escapeHtml(cmd.commandType)}</span></td>
+        <td class="mono">${formatNumber(cmd.value, 1)}${suffix}</td>
+        <td class="mono" style="color:var(--text-secondary)">${escapeHtml(issued)}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ============================================================
+  //  CESIUM MAP
+  // ============================================================
   async function initMap() {
     const imagery = await Cesium.TileMapServiceImageryProvider.fromUrl(
       Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
     );
-
     viewer = new Cesium.Viewer("map3d", {
-      animation: false,
-      timeline: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: true,
-      baseLayerPicker: false,
-      navigationHelpButton: false,
-      fullscreenButton: true,
-      infoBox: true,
-      selectionIndicator: true,
+      animation: false, timeline: false, geocoder: false,
+      homeButton: false, sceneModePicker: true, baseLayerPicker: false,
+      navigationHelpButton: false, fullscreenButton: true,
+      infoBox: true, selectionIndicator: true,
       baseLayer: new Cesium.ImageryLayer(imagery)
     });
-
     viewer.scene.globe.enableLighting = true;
-    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#0f1420");
+    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#080c14");
     viewer.scene.fog.enabled = false;
     viewer.clock.shouldAnimate = false;
 
     viewer.selectedEntityChanged.addEventListener(entity => {
       if (!entity || !entity.id) return;
-      const prefix = "ac-";
-      if (String(entity.id).startsWith(prefix)) {
-        selectedAircraftKey = String(entity.id).slice(prefix.length);
+      if (String(entity.id).startsWith("ac-")) {
+        selectedAircraftKey = String(entity.id).slice(3);
       }
     });
   }
@@ -459,108 +902,138 @@
     return points;
   }
 
-  function renderAircraftMap(data, conflictKeys = new Set()) {
+  function renderAircraftMap(data, conflictKeys = new Set(), conflictsData = []) {
     if (!viewer) return;
-
     const seen = new Set();
-    const positionsForFit = [];
+    const positions = [];
+
+    // Remove old conflict lines
+    [...viewer.entities.values].forEach(e => {
+      if (String(e.id || "").startsWith("conflict-line-")) viewer.entities.remove(e);
+    });
 
     if (!Array.isArray(data) || data.length === 0) {
-      viewer.entities.removeAll();
-      trails.clear();
-      return;
+      viewer.entities.removeAll(); trails.clear(); return;
     }
 
-    data.forEach(aircraft => {
-      const lat = Number(aircraft.latitude);
-      const lon = Number(aircraft.longitude);
+    // Index aircraft by ID for conflict lines
+    const acById = {};
+    data.forEach(ac => { acById[ac.aircraftId] = ac; });
+
+    data.forEach(ac => {
+      const lat = Number(ac.latitude), lon = Number(ac.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
 
-      const key = aircraftKey(aircraft);
+      const key = aircraftKey(ac);
       seen.add(key);
-      const altM = Math.max(Number(aircraft.altitude) || 0, 0) * FT_TO_M;
-      const heading = Number(aircraft.heading) || 0;
-      const inConflict = isInConflict(aircraft, conflictKeys);
+      const altM = Math.max(Number(ac.altitude) || 0, 0) * FT_TO_M;
+      const heading = Number(ac.heading) || 0;
+      const inConflict = isInConflict(ac, conflictKeys);
       const color = inConflict
         ? Cesium.Color.fromCssColorString("#ef4444")
-        : Cesium.Color.fromCssColorString("#38bdf8");
+        : Cesium.Color.fromCssColorString("#06b6d4");
 
       const position = Cesium.Cartesian3.fromDegrees(lon, lat, altM);
       const ground = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
-      positionsForFit.push(position);
+      positions.push(position);
       const trail = appendTrail(key, position);
-
       const headingRad = Cesium.Math.toRadians(heading);
       const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-        position,
-        new Cesium.HeadingPitchRoll(headingRad, 0, 0)
+        position, new Cesium.HeadingPitchRoll(headingRad, 0, 0)
       );
 
       const entityId = `ac-${key}`;
       let entity = viewer.entities.getById(entityId);
+      const icon = inConflict ? PLANE_CONFLICT_ICON : PLANE_ICON;
+
       if (!entity) {
         entity = viewer.entities.add({
-          id: entityId,
-          name: aircraft.callsign,
-          position,
-          orientation,
+          id: entityId, name: ac.callsign,
+          position, orientation,
           billboard: {
-            image: PLANE_ICON,
-            width: 36,
-            height: 36,
+            image: icon, width: 38, height: 38,
             alignedAxis: Cesium.Cartesian3.UNIT_Z,
             rotation: -headingRad,
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           },
           box: {
             dimensions: new Cesium.Cartesian3(900, 220, 90),
-            material: color,
-            outline: true,
-            outlineColor: Cesium.Color.WHITE.withAlpha(0.35)
+            material: color, outline: true,
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.25)
           },
           polyline: {
-            positions: [ground, position],
-            width: 1.5,
-            material: color.withAlpha(0.45)
+            positions: [ground, position], width: 1.5,
+            material: color.withAlpha(0.3)
           },
-          path: undefined,
           label: {
-            text: `${aircraft.callsign}\n${formatNumber(aircraft.altitude, 0)} ft  ${formatNumber(heading, 0)}°`,
-            font: "12px sans-serif",
+            text: `${ac.callsign}\n${formatNumber(ac.altitude, 0)} ft  ${formatNumber(heading, 0)}°  ${formatNumber(ac.speed, 0)}kt`,
+            font: "bold 12px Inter, sans-serif",
             fillColor: Cesium.Color.WHITE,
             showBackground: true,
-            backgroundColor: Cesium.Color.BLACK.withAlpha(0.55),
-            pixelOffset: new Cesium.Cartesian2(0, -36),
+            backgroundColor: inConflict
+              ? Cesium.Color.fromCssColorString("rgba(239,68,68,0.6)")
+              : Cesium.Color.fromCssColorString("rgba(8,12,20,0.7)"),
+            pixelOffset: new Cesium.Cartesian2(0, -40),
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         });
-
         viewer.entities.add({
           id: `trail-${key}`,
           polyline: {
-            positions: trail.slice(),
-            width: 2.5,
-            material: color.withAlpha(0.75)
+            positions: trail.slice(), width: 2.5,
+            material: color.withAlpha(0.6)
           }
         });
       } else {
         entity.position = position;
         entity.orientation = orientation;
-        entity.name = aircraft.callsign;
+        entity.name = ac.callsign;
+        entity.billboard.image = icon;
         entity.billboard.rotation = -headingRad;
-        entity.billboard.color = color;
         entity.box.material = color;
         entity.polyline.positions = [ground, position];
-        entity.polyline.material = color.withAlpha(0.45);
-        entity.label.text = `${aircraft.callsign}\n${formatNumber(aircraft.altitude, 0)} ft  ${formatNumber(heading, 0)}°`;
+        entity.polyline.material = color.withAlpha(0.3);
+        entity.label.text = `${ac.callsign}\n${formatNumber(ac.altitude, 0)} ft  ${formatNumber(heading, 0)}°  ${formatNumber(ac.speed, 0)}kt`;
+        entity.label.backgroundColor = inConflict
+          ? Cesium.Color.fromCssColorString("rgba(239,68,68,0.6)")
+          : Cesium.Color.fromCssColorString("rgba(8,12,20,0.7)");
         const trailEntity = viewer.entities.getById(`trail-${key}`);
         if (trailEntity) {
           trailEntity.polyline.positions = trail.slice();
-          trailEntity.polyline.material = color.withAlpha(0.75);
+          trailEntity.polyline.material = color.withAlpha(0.6);
         }
       }
     });
 
+    // Draw conflict connection lines (red dashed between conflicting aircraft)
+    if (Array.isArray(conflictsData)) {
+      conflictsData.forEach((c, i) => {
+        const acA = acById[c.aircraftAId];
+        const acB = acById[c.aircraftBId];
+        if (!acA || !acB) return;
+        const posA = Cesium.Cartesian3.fromDegrees(
+          Number(acA.longitude), Number(acA.latitude),
+          Math.max(Number(acA.altitude) || 0, 0) * FT_TO_M
+        );
+        const posB = Cesium.Cartesian3.fromDegrees(
+          Number(acB.longitude), Number(acB.latitude),
+          Math.max(Number(acB.altitude) || 0, 0) * FT_TO_M
+        );
+        viewer.entities.add({
+          id: `conflict-line-${i}`,
+          polyline: {
+            positions: [posA, posB],
+            width: 3,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString("#ef4444").withAlpha(0.8),
+              dashLength: 16
+            })
+          }
+        });
+      });
+    }
+
+    // Cleanup removed aircraft
     [...viewer.entities.values].forEach(entity => {
       const id = String(entity.id || "");
       if (id.startsWith("ac-") && !seen.has(id.slice(3))) {
@@ -571,24 +1044,20 @@
       }
     });
 
-    if (!didFitCamera && positionsForFit.length) {
-      fitAllTraffic();
-      didFitCamera = true;
-    } else if (followTraffic.checked && positionsForFit.length) {
-      fitAllTraffic();
-    }
+    if (!didFitCamera && positions.length) { fitAllTraffic(); didFitCamera = true; }
+    else if (followTraffic.checked && positions.length) { fitAllTraffic(); }
 
     if (selectedAircraftKey) {
-      const selected = viewer.entities.getById(`ac-${selectedAircraftKey}`);
-      if (selected) viewer.selectedEntity = selected;
+      const sel = viewer.entities.getById(`ac-${selectedAircraftKey}`);
+      if (sel) viewer.selectedEntity = sel;
     }
   }
 
   function fitAllTraffic() {
     if (!viewer) return;
-    const aircraftEntities = viewer.entities.values.filter(e => String(e.id || "").startsWith("ac-"));
-    if (!aircraftEntities.length) return;
-    viewer.flyTo(aircraftEntities, {
+    const ents = viewer.entities.values.filter(e => String(e.id || "").startsWith("ac-"));
+    if (!ents.length) return;
+    viewer.flyTo(ents, {
       duration: 1.2,
       offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-35), 0)
     });
@@ -612,33 +1081,35 @@
     if (viewer) viewer.entities.removeAll();
   }
 
-  /**
-   * Fetches current aircraft + conflicts for the active run,
-   * cross-references them, and renders the table and 3D map.
-   */
+  // ============================================================
+  //  POLLING
+  // ============================================================
   async function pollAircraft() {
     if (!currentRunId) return;
-
     try {
-      const [aircraftRes, conflictsRes, commandsRes] = await Promise.all([
+      const [acRes, conRes, cmdRes] = await Promise.all([
         fetch(`${API_BASE}/${currentRunId}/aircraft`),
         fetch(`${API_BASE}/${currentRunId}/conflicts`),
         fetch(`${API_BASE}/${currentRunId}/commands`)
       ]);
+      if (!acRes.ok) throw new Error(`Aircraft fetch failed (${acRes.status})`);
+      if (!conRes.ok) throw new Error(`Conflicts fetch failed (${conRes.status})`);
+      if (!cmdRes.ok) throw new Error(`Commands fetch failed (${cmdRes.status})`);
 
-      if (!aircraftRes.ok) throw new Error(`Aircraft fetch failed (${aircraftRes.status})`);
-      if (!conflictsRes.ok) throw new Error(`Conflicts fetch failed (${conflictsRes.status})`);
-      if (!commandsRes.ok) throw new Error(`Commands fetch failed (${commandsRes.status})`);
-
-      const aircraftData = await aircraftRes.json();
-      const conflictsData = await conflictsRes.json();
-      const commandsData = await commandsRes.json();
+      const aircraftData = await acRes.json();
+      const conflictsData = await conRes.json();
+      const commandsData = await cmdRes.json();
 
       const conflictKeys = extractConflictKeys(conflictsData);
       renderAircraftTable(aircraftData, conflictKeys);
-      renderAircraftMap(aircraftData, conflictKeys);
+      renderAircraftMap(aircraftData, conflictKeys, conflictsData);
       renderConflictsTable(conflictsData);
       renderCommandsTable(commandsData);
+      updateStats(
+        Array.isArray(aircraftData) ? aircraftData.length : 0,
+        Array.isArray(conflictsData) ? conflictsData.length : 0,
+        Array.isArray(commandsData) ? commandsData.length : 0
+      );
       clearError();
     } catch (err) {
       console.error(err);
@@ -646,21 +1117,15 @@
     }
   }
 
-  function startPolling() {
-    stopPolling();
-    pollAircraft();
-    pollTimerId = setInterval(pollAircraft, POLL_INTERVAL_MS);
-  }
+  function startPolling() { stopPolling(); pollAircraft(); pollTimerId = setInterval(pollAircraft, POLL_INTERVAL_MS); }
+  function stopPolling() { if (pollTimerId) { clearInterval(pollTimerId); pollTimerId = null; } }
 
-  function stopPolling() {
-    if (pollTimerId) {
-      clearInterval(pollTimerId);
-      pollTimerId = null;
-    }
-  }
-
+  // ============================================================
+  //  RUN CONTROLS
+  // ============================================================
   async function startRun() {
     startBtn.disabled = true;
+    prevConflictCount = 0;
     try {
       const res = await fetch(API_BASE, {
         method: "POST",
@@ -675,6 +1140,7 @@
       setRunningUI(runId);
       clearError();
       startPolling();
+      showToast("Simulation started — tracking aircraft", "success");
     } catch (err) {
       console.error(err);
       showError(`Could not start run: ${err.message}`);
@@ -688,10 +1154,10 @@
     try {
       const res = await fetch(`${API_BASE}/${currentRunId}/stop`, { method: "PATCH" });
       if (!res.ok) throw new Error(`Stop run failed (${res.status})`);
-
       stopPolling();
       setRunningUI(null);
       clearError();
+      showToast("Simulation stopped", "success");
     } catch (err) {
       console.error(err);
       showError(`Could not stop run: ${err.message}`);
@@ -699,22 +1165,20 @@
     }
   }
 
+  // ---- Event Listeners ----
   startBtn.addEventListener("click", startRun);
   stopBtn.addEventListener("click", stopRun);
   fitViewBtn.addEventListener("click", fitAllTraffic);
-  tableBody.addEventListener("click", (event) => {
-    const row = event.target.closest("tr[data-key]");
-    if (!row) return;
-    focusAircraft(row.getAttribute("data-key"));
+  tableBody.addEventListener("click", e => {
+    const row = e.target.closest("tr[data-key]");
+    if (row) focusAircraft(row.getAttribute("data-key"));
   });
 
-  initMap().catch(err => {
-    console.error(err);
-    showError(`Could not load 3D map: ${err.message}`);
-  });
+  initMap().catch(err => { console.error(err); showError(`Map error: ${err.message}`); });
 
   window.addEventListener("beforeunload", () => {
     stopPolling();
+    if (clockTimerId) clearInterval(clockTimerId);
     if (viewer && !viewer.isDestroyed()) viewer.destroy();
   });
 </script>

@@ -52,20 +52,43 @@ public class SimulationRunsController : ControllerBase
         _db.SimulationRuns.Add(run);
         await _db.SaveChangesAsync();
 
+        // ---------------------------------------------------------
+        //  10 aircraft — Indian airlines flying routes across India.
+        //  Real ICAO callsigns: AIC (Air India), IGO (IndiGo),
+        //  SEJ (SpiceJet), VTI (Vistara), QP (Akasa), AXB (AI Express).
+        // ---------------------------------------------------------
         var newAircraft = new List<Aircraft>
         {
-            new Aircraft { Callsign = "AA123", Icao24 = "A00001", RunId = run.RunId },
-            new Aircraft { Callsign = "BA456", Icao24 = "B00002", RunId = run.RunId },
-            new Aircraft { Callsign = "UA789", Icao24 = "C00003", RunId = run.RunId }
+            new Aircraft { Callsign = "AIC101", Icao24 = "800A01", RunId = run.RunId }, // Air India  DEL → BOM
+            new Aircraft { Callsign = "IGO202", Icao24 = "800B02", RunId = run.RunId }, // IndiGo     BOM → DEL  (converges with AIC101)
+            new Aircraft { Callsign = "SEJ305", Icao24 = "800C03", RunId = run.RunId }, // SpiceJet   BLR → MAA
+            new Aircraft { Callsign = "VTI847", Icao24 = "800D04", RunId = run.RunId }, // Vistara    HYD → CCU
+            new Aircraft { Callsign = "AIC412", Icao24 = "800E05", RunId = run.RunId }, // Air India  MAA → BOM
+            new Aircraft { Callsign = "IGO655", Icao24 = "800F06", RunId = run.RunId }, // IndiGo     CCU → DEL
+            new Aircraft { Callsign = "SEJ118", Icao24 = "800A07", RunId = run.RunId }, // SpiceJet   JAI → BLR  (converges with AIC789)
+            new Aircraft { Callsign = "AIC789", Icao24 = "800B08", RunId = run.RunId }, // Air India  AMD → HYD  (converges with SEJ118)
+            new Aircraft { Callsign = "AXB923", Icao24 = "800C09", RunId = run.RunId }, // AI Express GOA → MAA
+            new Aircraft { Callsign = "QPA301", Icao24 = "800D10", RunId = run.RunId }, // Akasa Air  LKO → BOM
         };
         _db.Aircraft.AddRange(newAircraft);
         await _db.SaveChangesAsync();
 
+        // Routes across India — DEL, BOM, BLR, MAA, CCU, HYD, JAI, AMD, GOA, LKO.
+        // Pairs (0,1) and (6,7) have converging headings at same altitude
+        // to guarantee conflicts within the first ~30 seconds.
         var initialPositions = new List<PositionLog>
         {
-            new PositionLog { AircraftId = newAircraft[0].AircraftId, Timestamp = now, Latitude = 40.7128m, Longitude = -74.0060m, AltitudeFt = 30000, HeadingDeg = 90, SpeedKts = 450 },
-            new PositionLog { AircraftId = newAircraft[1].AircraftId, Timestamp = now, Latitude = 40.7200m, Longitude = -74.0100m, AltitudeFt = 30000, HeadingDeg = 270, SpeedKts = 400 },
-            new PositionLog { AircraftId = newAircraft[2].AircraftId, Timestamp = now, Latitude = 40.8000m, Longitude = -73.9000m, AltitudeFt = 32000, HeadingDeg = 180, SpeedKts = 420 }
+            //                                                                         lat          lon         alt    hdg   spd
+            new PositionLog { AircraftId = newAircraft[0].AircraftId, Timestamp = now, Latitude = 28.5600m, Longitude = 77.1000m, AltitudeFt = 35000, HeadingDeg = 225, SpeedKts = 460 }, // AIC101: Delhi area, heading SW → Mumbai
+            new PositionLog { AircraftId = newAircraft[1].AircraftId, Timestamp = now, Latitude = 19.9000m, Longitude = 73.8000m, AltitudeFt = 35000, HeadingDeg =  30, SpeedKts = 450 }, // IGO202: near Nashik, heading NE → Delhi (converging!)
+            new PositionLog { AircraftId = newAircraft[2].AircraftId, Timestamp = now, Latitude = 13.2000m, Longitude = 77.7000m, AltitudeFt = 32000, HeadingDeg =  80, SpeedKts = 420 }, // SEJ305: Bangalore, heading E → Chennai
+            new PositionLog { AircraftId = newAircraft[3].AircraftId, Timestamp = now, Latitude = 17.2400m, Longitude = 78.4300m, AltitudeFt = 36000, HeadingDeg =  55, SpeedKts = 470 }, // VTI847: Hyderabad, heading NE → Kolkata
+            new PositionLog { AircraftId = newAircraft[4].AircraftId, Timestamp = now, Latitude = 13.0000m, Longitude = 80.1700m, AltitudeFt = 34000, HeadingDeg = 295, SpeedKts = 440 }, // AIC412: Chennai, heading WNW → Mumbai
+            new PositionLog { AircraftId = newAircraft[5].AircraftId, Timestamp = now, Latitude = 22.6500m, Longitude = 88.4500m, AltitudeFt = 33000, HeadingDeg = 285, SpeedKts = 455 }, // IGO655: Kolkata, heading W → Delhi
+            new PositionLog { AircraftId = newAircraft[6].AircraftId, Timestamp = now, Latitude = 26.8200m, Longitude = 75.8100m, AltitudeFt = 31000, HeadingDeg = 175, SpeedKts = 430 }, // SEJ118: Jaipur, heading S → Bangalore (converging!)
+            new PositionLog { AircraftId = newAircraft[7].AircraftId, Timestamp = now, Latitude = 23.0200m, Longitude = 72.5700m, AltitudeFt = 31000, HeadingDeg = 140, SpeedKts = 440 }, // AIC789: Ahmedabad, heading SE → Hyderabad (converging!)
+            new PositionLog { AircraftId = newAircraft[8].AircraftId, Timestamp = now, Latitude = 15.3800m, Longitude = 73.8300m, AltitudeFt = 29000, HeadingDeg = 105, SpeedKts = 400 }, // AXB923: Goa, heading ESE → Chennai
+            new PositionLog { AircraftId = newAircraft[9].AircraftId, Timestamp = now, Latitude = 26.7600m, Longitude = 80.8900m, AltitudeFt = 30000, HeadingDeg = 230, SpeedKts = 410 }, // QPA301: Lucknow, heading SW → Mumbai
         };
         _db.PositionLogs.AddRange(initialPositions);
         await _db.SaveChangesAsync();

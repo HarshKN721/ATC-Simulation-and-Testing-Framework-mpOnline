@@ -88,7 +88,7 @@ public class AtcDbContext : DbContext
         modelBuilder.Entity<ConflictEvent>(entity =>
         {
             entity.Property(c => c.HorizontalDistNm).HasColumnType("decimal(6,3)");
-            entity.Property(c => c.ResolutionAction).HasMaxLength(50);
+            entity.Property(c => c.ResolutionAction).HasMaxLength(100);
 
             entity.HasOne(c => c.AircraftA)
                 .WithMany()
