@@ -35,7 +35,6 @@ This project builds a **two-layer software framework** — a Simulation Engine a
 | IN26011732 | Harsh Kumar Nimesh |
 | IN26012122 | Arnav Majithia |
 | IN26009582 | Harsh Raj Singh |
-| IN26009579 | Aman Kumar Singh |
 | IN26009732 | Aditya Atreya |
 | IN26011664 | Aryaman Singh |
 
