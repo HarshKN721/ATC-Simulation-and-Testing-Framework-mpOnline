@@ -139,7 +139,7 @@ sequenceDiagram
 | **A** | Ingestion & Kinematics Layer     | Simulated ADS-B telemetry ingestion, real-time position/heading/speed updates per tick |
 | **B** | Conflict Detection & Management  | Horizontal/vertical separation checks, conflict lifecycle tracking                     |
 | **C** | Automated Vectoring & Resolution | Rule-based tactical resolution via `IControllerAgent`, command application             |
-| **D** | Analytics & Supervision          | Run history, conflict analytics, supervisor manual override                            |
+| **D** | Analytics & Supervision          | Interactive 2D radar view with tracks + conflict alerts; persist telemetry, conflict events, and reaction latencies to SQL Server; supervisor manual override |
 
 ---
 
