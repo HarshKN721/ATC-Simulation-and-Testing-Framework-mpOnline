@@ -208,7 +208,7 @@ erDiagram
 | `AppUser`       | Authenticated users (Supervisor / Engineer / Analyst roles)    |
 
 ```powershell
-# Scaffold EF Core models from an existing SQL Server schema
+# In Visual Studio Package Manager Console (EF Core Tools)
 Scaffold-DbContext "Server=.;Database=AtcSimDb;Trusted_Connection=True;" `
   Microsoft.EntityFrameworkCore.SqlServer -OutputDir Models
 ```
