@@ -23,7 +23,8 @@ This project builds a **two-layer software framework** — a **Simulation Engine
 - ⚠️ Detects horizontal/vertical separation conflicts between aircraft
 - 🤖 Dispatches conflicts to an automated controller agent and tests its tactical vectoring decisions
 - 🖥️ Visualizes everything live on a 2D radar view
-  > **📝 Note:** This implementation is intentionally scoped for a **7-member team** delivering in a **9–10 day sprint**. See [Scope Realignment](#-scope-realignment) for why the numbers differ from the original spec — every requirement is preserved, just resized to be honestly buildable.
+
+> **📝 Note:** This implementation is intentionally scoped for a **7-member team** delivering in a **9–10 day sprint**. See [Scope Realignment](#-scope-realignment) for why the numbers differ from the original spec — every requirement is preserved, just resized to be honestly buildable.
 
 ---
 
